@@ -1,20 +1,18 @@
 package de.uhh.lt.jst.dt
 
-import de.uhh.lt.jst.utils._
+import de.uhh.lt.jst.utils.Config
 import org.apache.spark.{SparkConf, SparkContext}
 
+object WordSimFromTermContext {
 
-object WordSimFromCounts {
-  val default = new  Config {
-    val wordsPerFeatureNum: Int= 1000
-    val significanceMin: Double = 0.0
-    val wordFeatureMinCount: Int = 2
-    val wordMinCount: Int = 2
-    val featureMinCount: Int = 2
-    val significanceType: String = "LMI"
-    val featuresPerWordNum: Int = 1000
-    val similarWordsMaxNum: Int = 200
-  }
+  val wordsPerFeatureNumDefault = 1000
+  val significanceMinDefault = 0.0
+  val wordFeatureMinCountDefault = 2
+  val wordMinCountDefault = 2
+  val featureMinCountDefault = 2
+  val significanceTypeDefault = "LMI"
+  val featuresPerWordNumDefault = 1000
+  val similarWordsMaxNumDefault = 200
 
   def main(args: Array[String]) {
     if (args.length < 4) {
@@ -28,14 +26,14 @@ object WordSimFromCounts {
       val featureCountsPath = args(1)
       val wordFeatureCountsPath = args(2)
       val outputDir = args(3)
-      val wordsPerFeatureNum: Int = args.getAsIntOrElse(4, default.wordsPerFeatureNum)
-      val featuresPerWordNum: Int = args.getAsIntOrElse(5, default.featuresPerWordNum)
-      val wordMinCount: Int = args.getAsIntOrElse(6, default.wordMinCount)
-      val featureMinCount: Int = args.getAsIntOrElse(7, default.featureMinCount)
-      val wordFeatureMinCount: Int = args.getAsIntOrElse(8, default.wordFeatureMinCount)
-      val significanceMin: Double = args.getAsDoubleOrElse(9, default.significanceMin)
-      val significanceType: String = args.getOrElse(10, default.significanceType)
-      val similarWordsMaxNum: Int = args.getAsIntOrElse(11, default.similarWordsMaxNum)
+      val wordsPerFeatureNum: Int = if (args.length > 4) args(4).toInt else wordsPerFeatureNumDefault
+      val featuresPerWordNum: Int = if (args.length > 5) args(5).toInt else featuresPerWordNumDefault
+      val wordMinCount: Int = if (args.length > 6) args(6).toInt else wordMinCountDefault
+      val featureMinCount: Int = if (args.length > 7) args(7).toInt else featureMinCountDefault
+      val wordFeatureMinCount: Int = if (args.length > 8) args(8).toInt else wordFeatureMinCountDefault
+      val significanceMin: Double = if (args.length > 9) args(9).toDouble else significanceMinDefault
+      val significanceType: String = if (args.length > 10) args(10) else significanceTypeDefault
+      val similarWordsMaxNum: Int = if (args.length > 11) args(11).toInt else similarWordsMaxNumDefault
     }
 
     val conf = new SparkConf().setAppName("JST: WordSimFromCounts")
@@ -43,7 +41,8 @@ object WordSimFromCounts {
     val sc = new SparkContext(conf)
 
     run(sc, config)
- }
+    //wordCountsPath, featureCountsPath, wordFeatureCountsPath, outputDir, wordsPerFeatureNum, featuresPerWordNum, wordMinCount, featureMinCount, wordFeatureMinCount, significanceMin, significanceType, similarWordsMaxNum)
+  }
 
   def run(sc: SparkContext, config: Config {
     val significanceType: String
@@ -103,4 +102,3 @@ object WordSimFromCounts {
     println(s"Features: $featuresPath")
   }
 }
-

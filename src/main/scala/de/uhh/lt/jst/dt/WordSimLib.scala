@@ -1,5 +1,6 @@
 package de.uhh.lt.jst.dt
 
+import de.uhh.lt.jst.utils.{Config, IndexModuloPartitioner}
 import org.apache.hadoop.io.compress.GzipCodec
 import org.apache.spark.rdd.RDD
 
@@ -111,31 +112,34 @@ object WordSimLib {
     (wordFeatureCounts, wordCounts, featureCounts)
   }
 
-  def computeFeatureScores(wordFeatureCounts: RDD[(String, (String, Int))],
-                           wordCounts: RDD[(String, Int)],
-                           featureCounts: RDD[(String, Int)],
-                           outputDir: String,
-                           wordsPerFeatureNum: Int,
-                           featuresPerWordNum: Int,
-                           wordCountMin: Int,
-                           featureCountMin: Int,
-                           wordFeatureCountMin: Int,
-                           significanceMin: Double,
-                           significance: (Long, Long, Long, Long) => Double) = {
+  def computeFeatureScores(
+    wordFeatureCounts: RDD[(String, (String, Int))],
+    wordCounts: RDD[(String, Int)],
+    featureCounts: RDD[(String, Int)],
+    config: Config {
+      val outputDir: String
+      val wordsPerFeatureNum: Int
+      val featuresPerWordNum: Int
+      val wordCountMin: Int
+      val featureCountMin: Int
+      val wordFeatureCountMin: Int
+      val significanceMin: Double
+      val significance: (Long, Long, Long, Long) => Double
+  }): RDD[(String, Array[(String, Double)])] = {
 
     val wordFeatureCountsFiltered =
-      if (wordFeatureCountMin > 1) wordFeatureCounts.filter({ case (word, (feature, wfc)) => wfc >= wordFeatureCountMin })
+      if (config.wordFeatureCountMin > 1) wordFeatureCounts.filter({ case (word, (feature, wfc)) => wfc >= config.wordFeatureCountMin })
       else wordFeatureCounts
 
     var featureCountsFiltered =
-      if (featureCountMin > 1) featureCounts.filter({ case (feature, fc) => fc >= featureCountMin })
+      if (config.featureCountMin > 1) featureCounts.filter({ case (feature, fc) => fc >= config.featureCountMin })
       else featureCounts
 
     val wordsPerFeatureCounts = wordFeatureCountsFiltered
       .map { case (word, (feature, wfc)) => (feature, word) }
       .groupByKey()
       .mapValues(v => v.size)
-      .filter { case (feature, numWords) => numWords <= wordsPerFeatureNum }
+      .filter { case (feature, numWords) => numWords <= config.wordsPerFeatureNum }
 
     featureCountsFiltered = featureCountsFiltered
       .join(wordsPerFeatureCounts) // filter using a join
@@ -143,7 +147,7 @@ object WordSimLib {
     featureCountsFiltered.cache()
 
     val wordCountsFiltered =
-      if (wordCountMin > 1) wordCounts.filter({ case (word, wc) => wc >= wordCountMin })
+      if (config.wordCountMin > 1) wordCounts.filter({ case (word, wc) => wc >= config.wordCountMin })
       else wordCounts
     wordCountsFiltered.cache()
 
@@ -157,27 +161,27 @@ object WordSimLib {
       .join(wordCountsFiltered)
       .map({ case (word, ((feature, wfc), wc)) => (feature, (word, wfc, wc)) })
       .join(featureCountsFiltered)
-      .map({ case (feature, ((word, wfc, wc), fc)) => (word, (feature, significance(n, wc, fc, wfc))) })
-      .filter({ case (word, (feature, score)) => score >= significanceMin })
+      .map({ case (feature, ((word, wfc, wc), fc)) => (word, (feature, config.significance(n, wc, fc, wfc))) })
+      .filter({ case (word, (feature, score)) => score >= config.significanceMin })
       .groupByKey()
       // (word, [(feature, score), (feature, score), ...])
-      .mapValues(featureScores => featureScores.toArray.sortWith({ case ((_, s1), (_, s2)) => s1 > s2 }).take(featuresPerWordNum)) // sort by value desc
+      .mapValues(featureScores => featureScores.toArray.sortWith({ case ((_, s1), (_, s2)) => s1 > s2 }).take(config.featuresPerWordNum)) // sort by value desc
 
     if (DEBUG) {
       wordFeatureCountsFiltered
         .join(wordCountsFiltered)
         .map({ case (word, ((feature, wfc), wc)) => (feature, (word, wfc, wc)) })
         .join(featureCountsFiltered)
-        .map({ case (feature, ((word, wfc, wc), fc)) => (word, feature, wc, fc, wfc, significance(n, wc, fc, wfc)) })
+        .map({ case (feature, ((word, wfc, wc), fc)) => (word, feature, wc, fc, wfc, config.significance(n, wc, fc, wfc)) })
         .sortBy({ case (word, feature, wc, fc, wfc, score) => score }, ascending = false)
         .map({ case (word, feature, wc, fc, wfc, score) => word + "\t" + feature + "\t" + wc + "\t" + fc + "\t" + wfc + "\t" + n + "\t" + score })
-        .saveAsTextFile(outputDir + "/AllValuesPerWord")
+        .saveAsTextFile(config.outputDir + "/AllValuesPerWord")
     }
 
     featuresPerWordWithScore
   }
 
-  def getSignificance(significanceType: String) = {
+  def getSignificance(significanceType: String): (Long, Long, Long, Long) => Double = {
     significanceType match {
       case "LMI" => WordSimLib.lmi _
       case "COV" => WordSimLib.cov _
@@ -186,31 +190,49 @@ object WordSimLib {
     }
   }
 
-  def computeWordSimsWithFeatures(wordFeatureCounts: RDD[(String, (String, Int))],
-                                  wordCounts: RDD[(String, Int)],
-                                  featureCounts: RDD[(String, Int)],
-                                  outputDir: String,
-                                  wordsPerFeatureMax: Int,
-                                  featuresPerWordMaxp: Int,
-                                  wordCountMin: Int,
-                                  featureCountMin: Int,
-                                  wordFeatureCountMin: Int,
-                                  significanceMin: Double,
-                                  similarWordsMaxNum: Int,
-                                  significanceType: String) = {
+  def computeWordSimsWithFeatures(
+    wordFeatureCounts: RDD[(String, (String, Int))],
+    wordCounts: RDD[(String, Int)],
+    featureCounts: RDD[(String, Int)],
+    config: Config {
+      val outputDir: String
+      val wordsPerFeatureMax: Int
+      val featuresPerWordMaxp: Int
+      val wordCountMin: Int
+      val featureCountMin: Int
+      val wordFeatureCountMin: Int
+      val significanceMin: Double
+      val similarWordsMaxNum: Int
+      val significanceType: String
+    })
+  : (String, String, String) = {
 
-    val wordSimsPath = outputDir + "/SimPruned"
-    val wordSimsPrunedWithFeaturesPath = if (DEBUG) outputDir + "/SimPrunedWithFeatures" else ""
-    val featuresPath = outputDir + "/FeaturesPruned"
+    val wordSimsPath = config.outputDir + "/SimPruned"
+    val wordSimsPrunedWithFeaturesPath = if (DEBUG) config.outputDir + "/SimPrunedWithFeatures" else ""
+    val featuresPath = config.outputDir + "/FeaturesPruned"
 
     // Normalize and prune word features
-    val sig = getSignificance(significanceType)
-    val featuresPerWordWithScore = computeFeatureScores(wordFeatureCounts, wordCounts, featureCounts, outputDir, wordsPerFeatureMax, featuresPerWordMaxp, wordCountMin, featureCountMin, wordFeatureCountMin, significanceMin, sig)
+    val sig = getSignificance(config.significanceType)
+    val featuresPerWordWithScore = computeFeatureScores(
+      wordFeatureCounts,
+      wordCounts,
+      featureCounts,
+      config = new Config {
+        val outputDir: String = config.outputDir
+        val wordsPerFeatureNum: Int = config.wordsPerFeatureMax
+        val featuresPerWordNum: Int = config.featuresPerWordMaxp
+        val wordCountMin: Int = config.wordCountMin
+        val featureCountMin: Int = config.featureCountMin
+        val wordFeatureCountMin: Int = config.wordFeatureCountMin
+        val significanceMin: Double = config.significanceMin
+        val significance: (Long, Long, Long, Long) => Double = sig
+      })
+
     featuresPerWordWithScore.cache()
 
     featuresPerWordWithScore
-      .flatMap { case (word, featureScores) => (featureScores
-        .map { case (feature, score) => f"$word\t$feature\t$score%.5f" })
+      .flatMap { case (word, featureScores) => featureScores
+        .map { case (feature, score) => f"$word\t$feature\t$score%.5f" }
       }
       .saveAsTextFile(featuresPath, classOf[GzipCodec])
 
@@ -223,7 +245,7 @@ object WordSimLib {
     val wordsPerFeature = featuresPerWord
       .flatMap({ case (word, features) => for (feature <- features.iterator) yield (feature, word) })
       .groupByKey()
-      .filter({ case (feature, words) => words.size <= wordsPerFeatureMax })
+      .filter({ case (feature, words) => words.size <= config.wordsPerFeatureMax })
       .sortBy(_._2.size, ascending = false)
 
     val wordsPerFeatureFairPartitioned = wordsPerFeature
@@ -237,14 +259,14 @@ object WordSimLib {
     val wordSimsAll: RDD[(String, (String, Double))] = wordsPerFeatureFairPartitioned
       .flatMap { case (feature, words) => for (word1 <- words.iterator; word2 <- words.iterator) yield ((word1, word2), 1.0) }
       .reduceByKey { case (score1, score2) => score1 + score2 }
-      .map { case ((word1, word2), scoreSum) => (word1, (word2, (scoreSum / featuresPerWordMaxp).toDouble)) }
+      .map { case ((word1, word2), scoreSum) => (word1, (word2, (scoreSum / config.featuresPerWordMaxp).toDouble)) }
       .sortBy({ case (word, (simWord, score)) => (word, score) }, ascending = false)
 
     val wordSimsPruned: RDD[(String, (String, Double))] = wordSimsAll
       .groupByKey()
       .mapValues(simWords => simWords.toArray
         .sortWith { case ((w1, s1), (w2, s2)) => s1 > s2 }
-        .take(similarWordsMaxNum))
+        .take(config.similarWordsMaxNum))
       .flatMap { case (word, simWords) => for (simWord <- simWords.iterator) yield (word, simWord) }
       .cache()
 
@@ -255,7 +277,7 @@ object WordSimLib {
     if (DEBUG) {
       wordsPerFeature
         .map { case (feature, words) => s"$feature\t${words.size}\t${words.mkString("  ")}" }
-        .saveAsTextFile(outputDir + "/WordsPerFeature", classOf[GzipCodec])
+        .saveAsTextFile(config.outputDir + "/WordsPerFeature", classOf[GzipCodec])
 
       wordSimsPruned
         .join(featuresPerWord)
